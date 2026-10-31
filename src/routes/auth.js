@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import { supabase, createAuthClient } from '../supabase.js'
 import { requireAuth } from '../middleware/requireAuth.js'
+import { isAdmin } from '../middleware/requireAdmin.js'
 
 const router = Router()
 
@@ -8,7 +9,7 @@ const toSessionResponse = ({ session, user }) => ({
   access_token: session.access_token,
   refresh_token: session.refresh_token,
   expires_at: session.expires_at,
-  user: { id: user.id, email: user.email },
+  user: { id: user.id, email: user.email, is_admin: isAdmin(user) },
 })
 
 const validateCredentials = (email, password) => {
@@ -61,7 +62,7 @@ router.post('/refresh', async (req, res) => {
 
 router.get('/me', requireAuth, (req, res) => {
   const { id, email, created_at } = req.user
-  res.json({ id, email, created_at })
+  res.json({ id, email, created_at, is_admin: isAdmin(req.user) })
 })
 
 export default router
