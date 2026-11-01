@@ -10,7 +10,7 @@ const FUSEAU = 'Europe/Paris'
 const JOURS_OUVRES = [1, 2, 3, 4, 5] // lundi → vendredi
 const HEURE_OUVERTURE = 9 * 60 // en minutes
 const HEURE_FERMETURE = 18 * 60
-const DUREE_BILAN = 90
+const DUREE_BILAN = 30
 const NB_JOURS = 28
 
 // Décalage (en minutes) entre l'heure de Paris et UTC à un instant donné (gère l'heure d'été)
