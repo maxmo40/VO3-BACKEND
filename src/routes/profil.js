@@ -2,11 +2,13 @@ import { Router } from 'express'
 import { supabase } from '../supabase.js'
 import { requireAuth } from '../middleware/requireAuth.js'
 import { estimerVo2max } from '../vo2max.js'
+import { DISTANCES, definirProtocole } from '../protocole.js'
 
 const router = Router()
 router.use(requireAuth)
 
-const COLONNES = 'prenom, nom, sexe, date_naissance, telephone, poids_kg, taille_cm, updated_at'
+const COLONNES =
+  'prenom, nom, sexe, date_naissance, telephone, poids_kg, taille_cm, vma_kmh, temps_5k_s, temps_10k_s, temps_semi_s, temps_marathon_s, updated_at'
 const SEXES = ['homme', 'femme', 'autre']
 
 const texte = (max) => (v) => {
@@ -19,6 +21,21 @@ const nombre = (min, max) => (v) => {
   const n = Number(v)
   if (!Number.isFinite(n) || n < min || n > max) return { error: `doit être entre ${min} et ${max}` }
   return { value: n }
+}
+
+// Durée en secondes, ou texte « mm:ss » / « h:mm:ss »
+const duree = (min, max) => (v) => {
+  let secondes = typeof v === 'number' ? v : null
+  if (typeof v === 'string') {
+    const morceaux = v.trim().split(':')
+    if (morceaux.length >= 2 && morceaux.length <= 3 && morceaux.every((m) => /^\d{1,2}$/.test(m))) {
+      const [s, m, h = 0] = morceaux.map(Number).reverse()
+      if (s < 60 && m < 60) secondes = h * 3600 + m * 60 + s
+    }
+  }
+  if (!Number.isInteger(secondes)) return { error: 'format attendu mm:ss ou h:mm:ss' }
+  if (secondes < min || secondes > max) return { error: 'temps hors des valeurs possibles' }
+  return { value: secondes }
 }
 
 // Chaque champ modifiable et sa validation ; une valeur vide efface le champ
@@ -41,6 +58,11 @@ const CHAMPS = {
     const result = nombre(30, 300)(v)
     return result.error ? result : { value: Math.round(result.value) }
   },
+  vma_kmh: (v) => {
+    const result = nombre(6, 30)(v)
+    return result.error ? result : { value: Math.round(result.value * 10) / 10 }
+  },
+  ...Object.fromEntries(Object.entries(DISTANCES).map(([champ, d]) => [champ, duree(d.min_s, d.max_s)])),
 }
 
 const LIBELLES = {
@@ -51,10 +73,12 @@ const LIBELLES = {
   date_naissance: 'Date de naissance',
   poids_kg: 'Poids',
   taille_cm: 'Taille',
+  vma_kmh: 'VMA',
+  ...Object.fromEntries(Object.entries(DISTANCES).map(([champ, d]) => [champ, `Temps sur ${d.libelle}`])),
 }
 
-// Le profil renvoyé au frontend inclut l'estimation de VO2max calculée à partir des données enregistrées
-const avecVo2max = (profil) => ({ ...profil, vo2max: estimerVo2max(profil) })
+// Le profil renvoyé au frontend inclut l'estimation de VO2max et le protocole du test d'effort
+const avecVo2max = (profil) => ({ ...profil, vo2max: estimerVo2max(profil), protocole: definirProtocole(profil) })
 
 router.get('/', async (req, res) => {
   const { data, error } = await supabase
