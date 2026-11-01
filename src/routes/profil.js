@@ -6,7 +6,7 @@ import { estimerVo2max } from '../vo2max.js'
 const router = Router()
 router.use(requireAuth)
 
-const COLONNES = 'prenom, nom, sexe, date_naissance, telephone, poids_kg, taille_cm, activite, updated_at'
+const COLONNES = 'prenom, nom, sexe, date_naissance, telephone, poids_kg, taille_cm, updated_at'
 const SEXES = ['homme', 'femme', 'autre']
 
 const texte = (max) => (v) => {
@@ -41,10 +41,6 @@ const CHAMPS = {
     const result = nombre(30, 300)(v)
     return result.error ? result : { value: Math.round(result.value) }
   },
-  activite: (v) => {
-    const n = Number(v)
-    return Number.isInteger(n) && n >= 0 && n <= 7 ? { value: n } : { error: 'doit être entre 0 et 7' }
-  },
 }
 
 const LIBELLES = {
@@ -55,7 +51,6 @@ const LIBELLES = {
   date_naissance: 'Date de naissance',
   poids_kg: 'Poids',
   taille_cm: 'Taille',
-  activite: "Niveau d'activité",
 }
 
 // Le profil renvoyé au frontend inclut l'estimation de VO2max calculée à partir des données enregistrées
