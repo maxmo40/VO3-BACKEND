@@ -7,10 +7,30 @@ export const DISTANCES = {
   temps_marathon_s: { libelle: 'Marathon', km: 42.195, pct_vma: 0.775, min_s: 6600, max_s: 28800 },
 }
 
-// Protocoles du test sur tapis, selon le bilan réservé
+// Protocoles du test sur tapis, selon le bilan réservé. Chaque protocole part de VMA - ecart_depart_kmh,
+// puis enchaîne les étapes de sa séquence ; la dernière étape se répète jusqu'à la fin du test.
+// Une étape = `nb` paliers de `duree_min` minutes, chacun `increment_kmh` plus rapide que le précédent.
 const PROTOCOLES = {
-  route: { pente_pct: 0, ecart_depart_kmh: 6, vitesse_min_kmh: 6, increment_kmh: 1, duree_palier_min: 1 },
-  trail: { pente_pct: 10, ecart_depart_kmh: 10, vitesse_min_kmh: 4, increment_kmh: 0.5, duree_palier_min: 1 },
+  route: {
+    pente_pct: 0,
+    ecart_depart_kmh: 8,
+    vitesse_min_kmh: 6,
+    sequence: [
+      { nb: 1, duree_min: 1, increment_kmh: 0 },
+      { nb: 1, duree_min: 2, increment_kmh: 1 },
+      { nb: 2, duree_min: 2, increment_kmh: 2 },
+      { nb: Infinity, duree_min: 1, increment_kmh: 0.5 },
+    ],
+  },
+  trail: {
+    pente_pct: 10,
+    ecart_depart_kmh: 10,
+    vitesse_min_kmh: 4,
+    sequence: [
+      { nb: 1, duree_min: 1, increment_kmh: 0 },
+      { nb: Infinity, duree_min: 1, increment_kmh: 0.5 },
+    ],
+  },
 }
 
 // Coût énergétique relatif de la course en pente (équation ACSM : 0,2 × v + 0,9 × v × pente).
@@ -35,30 +55,44 @@ export function estimerVma(profil) {
   return { valeur: arrondi(moyenne), source: 'estimee', detail }
 }
 
-function construireProtocole(vma, { pente_pct, ecart_depart_kmh, vitesse_min_kmh, increment_kmh, duree_palier_min }) {
+function construireProtocole(vma, { pente_pct, ecart_depart_kmh, vitesse_min_kmh, sequence }) {
   const depart = Math.max(vitesse_min_kmh, Math.floor(vma) - ecart_depart_kmh)
   const cout = coutRelatif(pente_pct)
   const paliers = []
-  // On monte jusqu'au premier palier au-dessus de la VMA (équivalent plat) : le test s'arrête à épuisement
   let vitesse = depart
-  do {
-    const numero = paliers.length + 1
-    paliers.push({
-      numero,
-      debut_min: (numero - 1) * duree_palier_min,
-      fin_min: numero * duree_palier_min,
-      vitesse_kmh: vitesse,
-      pct_vma: Math.round(((vitesse * cout) / vma) * 100),
-    })
-    vitesse += increment_kmh
-  } while (paliers.at(-1).pct_vma <= 100)
+  let temps = 0
+
+  // On enchaîne les étapes jusqu'au premier palier au-dessus de la VMA (équivalent plat) :
+  // le test s'arrête à épuisement
+  for (const { nb, duree_min, increment_kmh } of sequence) {
+    for (let i = 0; i < nb; i++) {
+      if (paliers.length) vitesse += increment_kmh
+      paliers.push({
+        numero: paliers.length + 1,
+        debut_min: temps,
+        fin_min: temps + duree_min,
+        vitesse_kmh: vitesse,
+        pct_vma: Math.round(((vitesse * cout) / vma) * 100),
+      })
+      temps += duree_min
+      if (paliers.at(-1).pct_vma > 100) break
+    }
+    if (paliers.at(-1).pct_vma > 100) break
+  }
 
   return {
     pente_pct,
+    // Vitesse qui, sur cette pente, demande autant d'énergie que la VMA à plat
+    vitesse_vma_kmh: arrondi(vma / cout),
     depart_kmh: depart,
-    increment_kmh,
-    duree_palier_min,
-    duree_max_min: paliers.length * duree_palier_min,
+    // Étapes pour décrire le protocole (la première, le départ, est décrite à part)
+    sequence: sequence.slice(1).map(({ nb, duree_min, increment_kmh }) => ({
+      nb: Number.isFinite(nb) ? nb : null,
+      duree_min,
+      increment_kmh,
+    })),
+    duree_depart_min: sequence[0].duree_min,
+    duree_max_min: temps,
     paliers,
   }
 }
