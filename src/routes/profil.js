@@ -2,7 +2,7 @@ import { Router } from 'express'
 import { supabase } from '../supabase.js'
 import { requireAuth } from '../middleware/requireAuth.js'
 import { estimerVo2max } from '../vo2max.js'
-import { DISTANCES, definirProtocole } from '../protocole.js'
+import { DISTANCES, definirProtocoles } from '../protocole.js'
 
 const router = Router()
 router.use(requireAuth)
@@ -77,8 +77,8 @@ const LIBELLES = {
   ...Object.fromEntries(Object.entries(DISTANCES).map(([champ, d]) => [champ, `Temps sur ${d.libelle}`])),
 }
 
-// Le profil renvoyé au frontend inclut l'estimation de VO2max et le protocole du test d'effort
-const avecVo2max = (profil) => ({ ...profil, vo2max: estimerVo2max(profil), protocole: definirProtocole(profil) })
+// Le profil renvoyé au frontend inclut l'estimation de VO2max et les protocoles du test d'effort
+const avecVo2max = (profil) => ({ ...profil, vo2max: estimerVo2max(profil), protocoles: definirProtocoles(profil) })
 
 router.get('/', async (req, res) => {
   const { data, error } = await supabase

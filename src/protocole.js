@@ -7,11 +7,15 @@ export const DISTANCES = {
   temps_marathon_s: { libelle: 'Marathon', km: 42.195, pct_vma: 0.775, min_s: 6600, max_s: 28800 },
 }
 
-// Protocole du test sur tapis : départ 6 km/h sous la VMA, +1 km/h toutes les minutes
-const ECART_DEPART_KMH = 6
-const VITESSE_DEPART_MIN = 6
-const INCREMENT_KMH = 1
-const DUREE_PALIER_MIN = 1
+// Protocoles du test sur tapis, selon le bilan réservé
+const PROTOCOLES = {
+  route: { pente_pct: 0, ecart_depart_kmh: 6, vitesse_min_kmh: 6, increment_kmh: 1, duree_palier_min: 1 },
+  trail: { pente_pct: 10, ecart_depart_kmh: 10, vitesse_min_kmh: 4, increment_kmh: 0.5, duree_palier_min: 1 },
+}
+
+// Coût énergétique relatif de la course en pente (équation ACSM : 0,2 × v + 0,9 × v × pente).
+// Sert à exprimer chaque vitesse en % de VMA « équivalent plat ».
+const coutRelatif = (pentePct) => (0.2 + 0.9 * (pentePct / 100)) / 0.2
 
 const arrondi = (n) => Math.round(n * 10) / 10
 
@@ -31,32 +35,40 @@ export function estimerVma(profil) {
   return { valeur: arrondi(moyenne), source: 'estimee', detail }
 }
 
-export function definirProtocole(profil) {
-  const vma = estimerVma(profil)
-  if (!vma) return null
-
-  const depart = Math.max(VITESSE_DEPART_MIN, Math.floor(vma.valeur) - ECART_DEPART_KMH)
+function construireProtocole(vma, { pente_pct, ecart_depart_kmh, vitesse_min_kmh, increment_kmh, duree_palier_min }) {
+  const depart = Math.max(vitesse_min_kmh, Math.floor(vma) - ecart_depart_kmh)
+  const cout = coutRelatif(pente_pct)
   const paliers = []
-  // On monte jusqu'au premier palier au-dessus de la VMA : le test s'arrête à épuisement
+  // On monte jusqu'au premier palier au-dessus de la VMA (équivalent plat) : le test s'arrête à épuisement
   let vitesse = depart
   do {
     const numero = paliers.length + 1
     paliers.push({
       numero,
-      debut_min: (numero - 1) * DUREE_PALIER_MIN,
-      fin_min: numero * DUREE_PALIER_MIN,
+      debut_min: (numero - 1) * duree_palier_min,
+      fin_min: numero * duree_palier_min,
       vitesse_kmh: vitesse,
-      pct_vma: Math.round((vitesse / vma.valeur) * 100),
+      pct_vma: Math.round(((vitesse * cout) / vma) * 100),
     })
-    vitesse += INCREMENT_KMH
-  } while (paliers.at(-1).vitesse_kmh <= vma.valeur)
+    vitesse += increment_kmh
+  } while (paliers.at(-1).pct_vma <= 100)
 
   return {
-    vma,
+    pente_pct,
     depart_kmh: depart,
-    increment_kmh: INCREMENT_KMH,
-    duree_palier_min: DUREE_PALIER_MIN,
-    duree_max_min: paliers.length * DUREE_PALIER_MIN,
+    increment_kmh,
+    duree_palier_min,
+    duree_max_min: paliers.length * duree_palier_min,
     paliers,
+  }
+}
+
+// Un protocole par bilan course ; le bilan vélo se règle en watts le jour de l'examen
+export function definirProtocoles(profil) {
+  const vma = estimerVma(profil)
+  if (!vma) return null
+  return {
+    vma,
+    ...Object.fromEntries(Object.entries(PROTOCOLES).map(([type, config]) => [type, construireProtocole(vma.valeur, config)])),
   }
 }
