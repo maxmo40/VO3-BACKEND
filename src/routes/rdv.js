@@ -2,6 +2,7 @@ import { Router } from 'express'
 import { supabase } from '../supabase.js'
 import { requireAuth } from '../middleware/requireAuth.js'
 import { BILANS, DUREE_BILAN_MINUTES, genererCreneaux } from '../creneaux.js'
+import { CONSENTEMENTS_REQUIS } from './consentements.js'
 import { COLONNES_PROTOCOLE, protocoleTrailChoisi, validerProtocoleTrail } from '../protocole.js'
 
 const router = Router()
@@ -67,6 +68,18 @@ router.post('/', requireAuth, async (req, res) => {
   const debutIso = typeof debut === 'string' && !isNaN(new Date(debut)) && new Date(debut).toISOString()
   if (!debutIso || !genererCreneaux().includes(debutIso)) {
     return res.status(400).json({ error: "Ce créneau n'est pas disponible" })
+  }
+
+  const { data: consentements, error: consentementsError } = await supabase
+    .from('consentements')
+    .select(CONSENTEMENTS_REQUIS.join(', '))
+    .eq('user_id', req.user.id)
+    .maybeSingle()
+  if (consentementsError) return res.status(500).json({ error: consentementsError.message })
+  if (!CONSENTEMENTS_REQUIS.every((champ) => consentements?.[champ])) {
+    return res.status(403).json({
+      error: "Acceptez la politique de confidentialité et attestez l'exactitude de vos informations pour réserver",
+    })
   }
 
   const { data, error } = await supabase
