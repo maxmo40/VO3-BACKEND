@@ -4,6 +4,7 @@ import authRouter from './routes/auth.js'
 import profilRouter from './routes/profil.js'
 import rdvRouter from './routes/rdv.js'
 import adminRouter from './routes/admin.js'
+import questionnaireRouter from './routes/questionnaire.js'
 
 const app = express()
 app.use(cors())
@@ -17,6 +18,7 @@ app.use('/api/auth', authRouter)
 app.use('/api/profil', profilRouter)
 app.use('/api/rdv', rdvRouter)
 app.use('/api/admin', adminRouter)
+app.use('/api/questionnaire', questionnaireRouter)
 
 const PORT = process.env.PORT || 4000
 app.listen(PORT, (error) => {
