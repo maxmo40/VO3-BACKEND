@@ -71,25 +71,29 @@ function construireProtocole(vma, { pente_pct, ecart_depart_kmh, vitesse_min_kmh
         numero: paliers.length + 1,
         debut_min: temps,
         fin_min: temps + duree_min,
-        vitesse_kmh: vitesse,
-        pct_vma: Math.round(((vitesse * cout) / vma) * 100),
+        valeur: vitesse,
+        pct: Math.round(((vitesse * cout) / vma) * 100),
       })
       temps += duree_min
-      if (paliers.at(-1).pct_vma > 100) break
+      if (paliers.at(-1).pct > 100) break
     }
-    if (paliers.at(-1).pct_vma > 100) break
+    if (paliers.at(-1).pct > 100) break
   }
 
   return {
+    unite: 'km/h',
     pente_pct,
     // Vitesse qui, sur cette pente, demande autant d'énergie que la VMA à plat
-    vitesse_vma_kmh: arrondi(vma / cout),
-    depart_kmh: depart,
+    repere: {
+      valeur: arrondi(vma / cout),
+      libelle: pente_pct ? `VMA (équiv. à ${pente_pct} %)` : 'VMA',
+    },
+    depart: depart,
     // Étapes pour décrire le protocole (la première, le départ, est décrite à part)
     sequence: sequence.slice(1).map(({ nb, duree_min, increment_kmh }) => ({
       nb: Number.isFinite(nb) ? nb : null,
       duree_min,
-      increment_kmh,
+      increment: increment_kmh,
     })),
     duree_depart_min: sequence[0].duree_min,
     duree_max_min: temps,
@@ -97,12 +101,70 @@ function construireProtocole(vma, { pente_pct, ecart_depart_kmh, vitesse_min_kmh
   }
 }
 
-// Un protocole par bilan course ; le bilan vélo se règle en watts le jour de l'examen
-export function definirProtocoles(profil) {
-  const vma = estimerVma(profil)
-  if (!vma) return null
-  return {
-    vma,
-    ...Object.fromEntries(Object.entries(PROTOCOLES).map(([type, config]) => [type, construireProtocole(vma.valeur, config)])),
+// Protocole vélo : rampe individualisée (Wasserman), 3 min d'échauffement puis un incrément par minute
+// calculé pour atteindre la puissance maximale prédite en ~10 min (cible usuelle : 8 à 12 min).
+const VELO = { duree_echauffement_min: 3, duree_rampe_min: 10, depart_min_w: 30, depart_max_w: 120 }
+const ML_O2_PAR_WATT = 10.3 // coût en O2 d'un watt supplémentaire (Wasserman)
+const ML_O2_PAR_KM_H_ET_KG = 3.5 // VO2max ≈ 3,5 × VMA en ml/kg/min (Léger)
+const RATIO_VELO_COURSE = 0.9 // la VO2max sur vélo est ~10 % plus basse qu'en course
+
+const arrondirA = (n, pas) => Math.round(n / pas) * pas
+
+function definirProtocoleVelo(profil, vma, vo2max) {
+  if (profil.poids_kg == null) return null
+  const poids = Number(profil.poids_kg)
+
+  // VO2max sur vélo (ml/min) : d'après la VMA si on la connaît (plus juste pour un sportif),
+  // sinon d'après les équations de Hansen / Wasserman (âge, sexe, taille, poids)
+  const vo2maxVelo = vma
+    ? vma.valeur * ML_O2_PAR_KM_H_ET_KG * poids * RATIO_VELO_COURSE
+    : vo2max?.velo && vo2max.velo.l_min * 1000
+  if (!vo2maxVelo) return null
+
+  const vo2PedalageAVide = 150 + 6 * poids // ml/min, pédalage sans charge
+  const pmax = arrondirA((vo2maxVelo - vo2PedalageAVide) / ML_O2_PAR_WATT, 5)
+  const depart = Math.min(VELO.depart_max_w, Math.max(VELO.depart_min_w, arrondirA(pmax * 0.25, 10)))
+  const increment = Math.max(10, arrondirA((pmax - depart) / VELO.duree_rampe_min, 5))
+
+  const paliers = []
+  let puissance = depart
+  let temps = 0
+  const ajouter = (duree) => {
+    paliers.push({
+      numero: paliers.length + 1,
+      debut_min: temps,
+      fin_min: temps + duree,
+      valeur: puissance,
+      pct: Math.round((puissance / pmax) * 100),
+    })
+    temps += duree
   }
+  ajouter(VELO.duree_echauffement_min)
+  // Jusqu'au premier palier au-delà de la puissance maximale prédite : le test s'arrête à épuisement
+  while (paliers.at(-1).pct <= 100) {
+    puissance += increment
+    ajouter(1)
+  }
+
+  return {
+    unite: 'W',
+    base: vma ? 'vma' : 'morphologie',
+    repere: { valeur: pmax, libelle: 'Puissance max estimée' },
+    depart,
+    duree_depart_min: VELO.duree_echauffement_min,
+    sequence: [{ nb: null, duree_min: 1, increment }],
+    duree_max_min: temps,
+    paliers,
+  }
+}
+
+// Un protocole par bilan : route et trail d'après la VMA, vélo d'après la VMA ou la morphologie
+export function definirProtocoles(profil, vo2max) {
+  const vma = estimerVma(profil)
+  const course = vma
+    ? Object.fromEntries(Object.entries(PROTOCOLES).map(([type, config]) => [type, construireProtocole(vma.valeur, config)]))
+    : { route: null, trail: null }
+  const velo = definirProtocoleVelo(profil, vma, vo2max)
+  if (!vma && !velo) return null
+  return { vma, ...course, velo }
 }

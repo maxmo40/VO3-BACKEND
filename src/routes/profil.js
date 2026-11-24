@@ -78,7 +78,10 @@ const LIBELLES = {
 }
 
 // Le profil renvoyé au frontend inclut l'estimation de VO2max et les protocoles du test d'effort
-const avecVo2max = (profil) => ({ ...profil, vo2max: estimerVo2max(profil), protocoles: definirProtocoles(profil) })
+const avecVo2max = (profil) => {
+  const vo2max = estimerVo2max(profil)
+  return { ...profil, vo2max, protocoles: definirProtocoles(profil, vo2max) }
+}
 
 router.get('/', async (req, res) => {
   const { data, error } = await supabase
