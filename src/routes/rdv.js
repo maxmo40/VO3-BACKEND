@@ -2,11 +2,22 @@ import { Router } from 'express'
 import { supabase } from '../supabase.js'
 import { requireAuth } from '../middleware/requireAuth.js'
 import { BILANS, DUREE_BILAN_MINUTES, genererCreneaux } from '../creneaux.js'
+import { COLONNES_PROTOCOLE, protocoleTrailChoisi, validerProtocoleTrail } from '../protocole.js'
 
 const router = Router()
 
 // Délai minimum pour annuler soi-même un rendez-vous
 const DELAI_ANNULATION_HEURES = 24
+
+const COLONNES_RDV = `id, type_bilan, debut, prix_centimes, statut, ${COLONNES_PROTOCOLE}`
+
+// Format envoyé au frontend : les colonnes protocole_* sont regroupées dans `protocole`
+const versClient = ({ protocole_choix, protocole_pente_pct, protocole_depart_kmh, protocole_duree_min, protocole_increment_kmh, ...rdv }) => ({
+  ...rdv,
+  libelle: BILANS[rdv.type_bilan]?.libelle,
+  annulable: estAnnulable(rdv),
+  protocole: protocoleTrailChoisi({ protocole_choix, protocole_pente_pct, protocole_depart_kmh, protocole_duree_min, protocole_increment_kmh }),
+})
 
 const estAnnulable = (rdv) =>
   rdv.statut !== 'annule' && Date.now() <= new Date(rdv.debut).getTime() - DELAI_ANNULATION_HEURES * 3600_000
@@ -39,12 +50,12 @@ router.get('/creneaux', async (req, res) => {
 router.get('/mes-rdv', requireAuth, async (req, res) => {
   const { data, error } = await supabase
     .from('rendez_vous')
-    .select('id, type_bilan, debut, prix_centimes, statut')
+    .select(COLONNES_RDV)
     .eq('user_id', req.user.id)
     .neq('statut', 'annule')
     .order('debut', { ascending: true })
   if (error) return res.status(500).json({ error: error.message })
-  res.json(data.map((r) => ({ ...r, libelle: BILANS[r.type_bilan]?.libelle, annulable: estAnnulable(r) })))
+  res.json(data.map(versClient))
 })
 
 // Réservation + paiement (simulé pour l'instant : le rendez-vous est confirmé directement)
@@ -61,7 +72,7 @@ router.post('/', requireAuth, async (req, res) => {
   const { data, error } = await supabase
     .from('rendez_vous')
     .insert({ user_id: req.user.id, type_bilan, debut: debutIso, prix_centimes: bilan.prix_centimes })
-    .select('id, type_bilan, debut, prix_centimes, statut')
+    .select(COLONNES_RDV)
     .single()
 
   // 23505 = violation de l'index unique : quelqu'un vient de réserver ce créneau
@@ -69,7 +80,7 @@ router.post('/', requireAuth, async (req, res) => {
     return res.status(409).json({ error: "Ce créneau vient d'être réservé, choisissez-en un autre" })
   }
   if (error) return res.status(500).json({ error: error.message })
-  res.status(201).json({ ...data, libelle: bilan.libelle, annulable: estAnnulable(data) })
+  res.status(201).json(versClient(data))
 })
 
 router.post('/:id/annuler', requireAuth, async (req, res) => {
@@ -101,6 +112,34 @@ router.post('/:id/annuler', requireAuth, async (req, res) => {
     .single()
   if (updateError) return res.status(500).json({ error: updateError.message })
   res.json({ ...data, libelle: BILANS[data.type_bilan]?.libelle, annulable: false })
+})
+
+// Protocole trail choisi par le client, modifiable jusqu'au début du rendez-vous
+router.put('/:id/protocole', requireAuth, async (req, res) => {
+  if (!/^\d+$/.test(req.params.id)) return res.status(404).json({ error: 'Rendez-vous introuvable' })
+  const { colonnes, error: invalide } = validerProtocoleTrail(req.body)
+  if (invalide) return res.status(400).json({ error: invalide })
+
+  const { data: rdv, error } = await supabase
+    .from('rendez_vous')
+    .select('id, type_bilan, debut, statut')
+    .eq('id', req.params.id)
+    .eq('user_id', req.user.id)
+    .maybeSingle()
+  if (error) return res.status(500).json({ error: error.message })
+  if (!rdv || rdv.statut === 'annule') return res.status(404).json({ error: 'Rendez-vous introuvable' })
+  if (rdv.type_bilan !== 'trail') return res.status(400).json({ error: 'Le choix du protocole concerne les bilans trail' })
+  if (new Date(rdv.debut) <= new Date()) return res.status(409).json({ error: 'Le rendez-vous a déjà commencé' })
+
+  const { data, error: updateError } = await supabase
+    .from('rendez_vous')
+    .update(colonnes)
+    .eq('id', rdv.id)
+    .eq('user_id', req.user.id)
+    .select(COLONNES_RDV)
+    .single()
+  if (updateError) return res.status(500).json({ error: updateError.message })
+  res.json(versClient(data))
 })
 
 export default router

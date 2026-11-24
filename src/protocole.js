@@ -168,3 +168,50 @@ export function definirProtocoles(profil, vo2max) {
   if (!vma && !velo) return null
   return { vma, ...course, velo }
 }
+
+// ——— Protocole trail choisi par le client pour son rendez-vous ———
+
+export const CHOIX_TRAIL = {
+  base: 'Protocole proposé',
+  bal: 'Protocole Sentier BAL',
+  breche: 'Protocole BRECHE 🔥',
+  perso: 'Configuration personnalisée',
+}
+
+const REGLAGES_TRAIL = {
+  pente_pct: { min: 0, max: 25, libelle: 'Pente' },
+  depart_kmh: { min: 2, max: 20, libelle: 'Allure de départ' },
+  duree_min: { min: 0.5, max: 5, libelle: 'Durée des paliers' },
+  increment_kmh: { min: 0.1, max: 2, libelle: 'Écart entre paliers' },
+}
+
+export const COLONNES_PROTOCOLE =
+  'protocole_choix, protocole_pente_pct, protocole_depart_kmh, protocole_duree_min, protocole_increment_kmh'
+
+// Valide le choix envoyé par le frontend ; renvoie les colonnes à enregistrer
+export function validerProtocoleTrail(body) {
+  const { choix } = body ?? {}
+  if (!CHOIX_TRAIL[choix]) return { error: 'Protocole inconnu' }
+  const colonnes = { protocole_choix: choix }
+  for (const [cle, { min, max, libelle }] of Object.entries(REGLAGES_TRAIL)) {
+    const n = Number(body[cle])
+    if (!Number.isFinite(n) || n < min || n > max) return { error: `${libelle} : entre ${min} et ${max}` }
+    colonnes[`protocole_${cle}`] = Math.round(n * 10) / 10
+  }
+  return { colonnes }
+}
+
+// Ligne de rendez_vous → protocole choisi (ou null), au même format que les protocoles calculés
+export function protocoleTrailChoisi(rdv) {
+  if (!rdv.protocole_choix) return null
+  const duree = Number(rdv.protocole_duree_min)
+  return {
+    choix: rdv.protocole_choix,
+    titre: CHOIX_TRAIL[rdv.protocole_choix],
+    unite: 'km/h',
+    pente_pct: Number(rdv.protocole_pente_pct),
+    depart: Number(rdv.protocole_depart_kmh),
+    duree_depart_min: duree,
+    sequence: [{ nb: null, duree_min: duree, increment: Number(rdv.protocole_increment_kmh) }],
+  }
+}
